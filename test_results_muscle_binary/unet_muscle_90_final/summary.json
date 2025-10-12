@@ -1,0 +1,28 @@
+{
+  "checkpoint": "./checkpoints/unet_muscle_90_final.pth",
+  "dataset": "Muscle-Binary",
+  "split": "test.txt",
+  "overall_metrics": {
+    "dice": 0.9779300187430991,
+    "dice_std": 0.08859317902208479,
+    "iou": 0.9656085474047155,
+    "iou_std": 0.10420467279507058,
+    "bce_loss": 0.00406804222907642,
+    "n_samples": 10866
+  },
+  "efficiency": {
+    "parameters_M": 17.261825,
+    "inference_time_ms": 4.0339659999999835,
+    "fps": 247.89499961080585,
+    "gpu_memory_mb": 250.68505859375
+  },
+  "config": {
+    "batch_size": 4,
+    "input_shape": [
+      1,
+      1,
+      256,
+      256
+    ]
+  }
+}
