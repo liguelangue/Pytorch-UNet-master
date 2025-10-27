@@ -23,23 +23,37 @@ from muscle_dataset_multi import MuscleMRIDatasetMulti
 from efficiency_monitor import quick_check
 
 
-def dice_score(pred, target, smooth: float = 1e-6):
-    """pred/target: (B, 1, H, W)"""
-    pred = (pred > 0.5).float()
-    target = target.float()
-    inter = (pred * target).sum(dim=(1, 2, 3))
-    union = pred.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3))
-    dice = (2.0 * inter + smooth) / (union + smooth)
-    return dice
+def dice_score_multi_class(pred, target, num_classes=3, smooth=1e-6):
+    """Calculate Dice score for multi-class segmentation"""
+    dice_scores = []
+    pred = torch.softmax(pred, dim=1)
+    
+    for class_id in range(num_classes):
+        pred_class = pred[:, class_id]
+        target_class = (target == class_id).float()
+        
+        intersection = (pred_class * target_class).sum(dim=(1, 2))
+        union = pred_class.sum(dim=(1, 2)) + target_class.sum(dim=(1, 2))
+        dice = (2. * intersection + smooth) / (union + smooth)
+        dice_scores.append(dice.mean().item())
+    
+    return np.mean(dice_scores)
 
-
-def iou_score(pred, target, smooth: float = 1e-6):
-    pred = (pred > 0.5).float()
-    target = target.float()
-    inter = (pred * target).sum(dim=(1, 2, 3))
-    union = ((pred + target) > 0).float().sum(dim=(1, 2, 3))
-    iou = (inter + smooth) / (union + smooth)
-    return iou
+def iou_score_multi_class(pred, target, num_classes=3, smooth=1e-6):
+    """Calculate IoU score for multi-class segmentation"""
+    iou_scores = []
+    pred = torch.softmax(pred, dim=1)
+    
+    for class_id in range(num_classes):
+        pred_class = pred[:, class_id]
+        target_class = (target == class_id).float()
+        
+        intersection = (pred_class * target_class).sum(dim=(1, 2))
+        union = pred_class.sum(dim=(1, 2)) + target_class.sum(dim=(1, 2)) - intersection
+        iou = (intersection + smooth) / (union + smooth)
+        iou_scores.append(iou.mean().item())
+    
+    return np.mean(iou_scores)
 
 
 def main():
@@ -64,7 +78,8 @@ def main():
         MASK_DIR, 
         transform=None,
         target_size=target_size,
-        search_subfolders=True
+        search_subfolders=True,
+        num_classes=3
     )
     test_loader = DataLoader(test_dataset,
                              batch_size=BATCH_SIZE,
@@ -73,7 +88,7 @@ def main():
                              pin_memory=True)
     
     # Model
-    model = UNet(n_channels=1, n_classes=1, bilinear=True).to(device)
+    model = UNet(n_channels=1, n_classes=3, bilinear=True).to(device)  # 3 classes: background, muscle1, muscle2
     if not os.path.isfile(CHECKPOINT):
         raise FileNotFoundError(f"Checkpoint '{CHECKPOINT}' not found!")
     
@@ -100,7 +115,7 @@ def main():
     print(f"[INFO] Testing on {len(test_dataset)} images")
     
     # Loss
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()  # Use CrossEntropyLoss for multi-class segmentation
     
     # Create results directory
     results_dir = Path(RESULTS_DIR) / Path(CHECKPOINT).stem
@@ -127,18 +142,18 @@ def main():
             
             # Forward propagation
             logits = model(images)
-            probs = torch.sigmoid(logits)
+            probs = torch.softmax(logits, dim=1)  # Use softmax for multi-class
             
             # Calculate batch loss
             batch_loss = criterion(logits, masks)
             
             # Calculate metrics for each sample
-            dice_scores = dice_score(probs, masks)
-            iou_scores = iou_score(probs, masks)
+            dice_scores = dice_score_multi_class(logits, masks, num_classes=3)
+            iou_scores = iou_score_multi_class(logits, masks, num_classes=3)
             
             # Save predictions (if needed)
             if SAVE_PNG:
-                preds_np = (probs.cpu().numpy() > 0.5).astype(np.uint8) * 255
+                preds_np = torch.argmax(probs, dim=1).cpu().numpy()  # Get class predictions
                 for i in range(preds_np.shape[0]):
                     filename = filenames[i]
                     
@@ -167,15 +182,21 @@ def main():
                         if slice_part.startswith('slice_'):
                             slice_num = slice_part[6:]  # Remove 'slice_' prefix
                     
+                    # Scale class predictions to original values (0, 21, 90)
+                    pred_mask = preds_np[i].astype(np.uint8)
+                    pred_mask[pred_mask == 1] = 21  # Muscle class 1
+                    pred_mask[pred_mask == 2] = 90  # Muscle class 2
+                    # Class 0 remains 0 (background)
+                    
                     # Create filename in format: 001_0000.png
                     fname = f"{patient_num}_{slice_num}.png"
-                    cv2.imwrite(str(pred_dir / fname), preds_np[i, 0])
+                    cv2.imwrite(str(pred_dir / fname), pred_mask)
             
             # Process each sample
             for i in range(images.size(0)):
                 filename = filenames[i]
-                dice_val = dice_scores[i].item()
-                iou_val = iou_scores[i].item()
+                dice_val = dice_scores  # Multi-class function returns single value
+                iou_val = iou_scores    # Multi-class function returns single value
                 loss_val = batch_loss.item()  # Batch-level loss
                 
                 # Store overall metrics

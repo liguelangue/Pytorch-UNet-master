@@ -6,12 +6,21 @@ import cv2
 import glob
 
 class MuscleMRIDatasetMulti(Dataset):
-    def __init__(self, image_dir, mask_dir, transform=None, target_size=(256, 256), search_subfolders=True):
+    def __init__(self, image_dir, mask_dir, transform=None, target_size=(256, 256), search_subfolders=True, 
+                num_classes=3):
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.transform = transform
         self.target_size = target_size
         self.search_subfolders = search_subfolders
+        self.num_classes = num_classes
+        
+        # Define color to class mapping based on your analysis
+        self.color_to_class = {
+            (0, 0, 0): 0,        # Background (black)
+            (21, 21, 21): 1,     # Muscle #21 class 1 (gray value 21)
+            (90, 90, 90): 2,     # Muscle #90 class 2 (gray value 90)
+        }
         
         # If search_subfolders is True, find all images recursively
         if self.search_subfolders:
@@ -32,6 +41,20 @@ class MuscleMRIDatasetMulti(Dataset):
         
         return relative_paths
 
+    def _color_to_class_mask(self, color_mask):
+        """Convert color mask to class indices"""
+        h, w, c = color_mask.shape
+        class_mask = np.zeros((h, w), dtype=np.int64)
+        
+        for color, class_id in self.color_to_class.items():
+            # Create mask for this color (BGR format in OpenCV)
+            color_mask_bool = (color_mask[:, :, 0] == color[0]) & \
+                             (color_mask[:, :, 1] == color[1]) & \
+                             (color_mask[:, :, 2] == color[2])
+            class_mask[color_mask_bool] = class_id
+        
+        return class_mask
+
     def __len__(self):
         return len(self.image_list)
 
@@ -40,15 +63,9 @@ class MuscleMRIDatasetMulti(Dataset):
         if name.endswith('.png'):
             name = name[:-4]
 
-        # Handle both flat structure and subfolder structure
-        if self.search_subfolders:
-            # For subfolder structure, name already includes the subfolder path
-            img_path = os.path.join(self.image_dir, name + ".png")
-            mask_path = os.path.join(self.mask_dir, name + ".png")
-        else:
-            # For flat structure, use original logic
-            img_path = os.path.join(self.image_dir, name + ".png")
-            mask_path = os.path.join(self.mask_dir, name + ".png")
+        # Construct paths
+        img_path = os.path.join(self.image_dir, name + ".png")
+        mask_path = os.path.join(self.mask_dir, name + ".png")
 
         if not os.path.exists(img_path):
             raise FileNotFoundError(f"Image not found: {img_path}")
@@ -56,23 +73,26 @@ class MuscleMRIDatasetMulti(Dataset):
             raise FileNotFoundError(f"Mask not found: {mask_path}")
 
         image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        mask = cv2.imread(mask_path, cv2.IMREAD_COLOR)  # Read color mask for multi-class
 
         # Resize to target size (configurable)
         if self.target_size is not None:
             image = cv2.resize(image, self.target_size, interpolation=cv2.INTER_LINEAR)
             mask = cv2.resize(mask, self.target_size, interpolation=cv2.INTER_NEAREST)
 
+        # Normalize image
         image = image.astype(np.float32) / 255.0
-        mask = (mask > 127).astype(np.float32)
+        
+        # Convert color mask to class indices
+        mask = self._color_to_class_mask(mask)
 
+        # Add channel dimension to image
         image = np.expand_dims(image, axis=0)
-        mask = np.expand_dims(mask, axis=0)
 
         if self.transform:
             image, mask = self.transform(image, mask)
 
         return (torch.tensor(image, dtype=torch.float32), 
-                torch.tensor(mask, dtype=torch.float32),
+                torch.tensor(mask, dtype=torch.long),  # Use long for class indices
                 name + ".png")
 

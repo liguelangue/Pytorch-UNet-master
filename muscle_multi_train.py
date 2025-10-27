@@ -3,6 +3,7 @@
 import os
 import torch
 import torch.nn as nn
+import numpy as np
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
@@ -11,21 +12,37 @@ from unet import UNet  # Implementation from milesial
 from muscle_dataset_multi import MuscleMRIDatasetMulti
 
 
-def dice_score(pred, target, smooth=1e-6):
-    pred = (pred > 0.5).float()
-    target = target.float()
-    intersection = (pred * target).sum(dim=(1, 2, 3))
-    union = pred.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3))
-    dice = (2. * intersection + smooth) / (union + smooth)
-    return dice.mean().item()
+def dice_score_multi_class(pred, target, num_classes=3, smooth=1e-6):
+    """Calculate Dice score for multi-class segmentation"""
+    dice_scores = []
+    pred = torch.softmax(pred, dim=1)
+    
+    for class_id in range(num_classes):
+        pred_class = pred[:, class_id]
+        target_class = (target == class_id).float()
+        
+        intersection = (pred_class * target_class).sum(dim=(1, 2))
+        union = pred_class.sum(dim=(1, 2)) + target_class.sum(dim=(1, 2))
+        dice = (2. * intersection + smooth) / (union + smooth)
+        dice_scores.append(dice.mean().item())
+    
+    return np.mean(dice_scores)
 
-def iou_score(pred, target, smooth=1e-6):
-    pred = (pred > 0.5).float()
-    target = target.float()
-    intersection = (pred * target).sum(dim=(1, 2, 3))
-    union = (pred + target).clamp(0, 1).sum(dim=(1, 2, 3))
-    iou = (intersection + smooth) / (union + smooth)
-    return iou.mean().item()
+def iou_score_multi_class(pred, target, num_classes=3, smooth=1e-6):
+    """Calculate IoU score for multi-class segmentation"""
+    iou_scores = []
+    pred = torch.softmax(pred, dim=1)
+    
+    for class_id in range(num_classes):
+        pred_class = pred[:, class_id]
+        target_class = (target == class_id).float()
+        
+        intersection = (pred_class * target_class).sum(dim=(1, 2))
+        union = pred_class.sum(dim=(1, 2)) + target_class.sum(dim=(1, 2)) - intersection
+        iou = (intersection + smooth) / (union + smooth)
+        iou_scores.append(iou.mean().item())
+    
+    return np.mean(iou_scores)
 
 
 def main():
@@ -50,25 +67,27 @@ def main():
         IMAGE_DIR, MASK_DIR, 
         transform=None,
         target_size=target_size,
-        search_subfolders=True
+        search_subfolders=True,
+        num_classes=3
     )
     val_dataset = MuscleMRIDatasetMulti(
         IMAGE_DIR, MASK_DIR,
         transform=None,
         target_size=target_size,
-        search_subfolders=True
+        search_subfolders=True,
+        num_classes=3
     )
     train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False)
 
     # ✅ Initialize model
-    model = UNet(n_channels=1, n_classes=1, bilinear=True).to(device)
+    model = UNet(n_channels=1, n_classes=3, bilinear=True).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"📦 Model Parameters: Total = {total_params:,}, Trainable = {trainable_params:,}")
 
     # ✅ Loss function and optimizer
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()  # Use CrossEntropyLoss for multi-class segmentation
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)  # Increase learning rate for faster convergence
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
@@ -113,9 +132,9 @@ def main():
                 loss = criterion(outputs, masks)
                 val_loss += loss.item() * images.size(0)
 
-                preds = torch.sigmoid(outputs)
-                dice_total += dice_score(preds, masks) * images.size(0)
-                iou_total += iou_score(preds, masks) * images.size(0)
+                # For multi-class segmentation, use softmax instead of sigmoid
+                dice_total += dice_score_multi_class(outputs, masks, num_classes=3) * images.size(0)
+                iou_total += iou_score_multi_class(outputs, masks, num_classes=3) * images.size(0)
 
         val_loss /= len(val_loader.dataset)
         val_dice = dice_total / len(val_loader.dataset)

@@ -1,0 +1,28 @@
+{
+  "checkpoint": "./checkpoints/unet_muscle_3_classes.pth",
+  "dataset": "Muscle-Binary",
+  "split": "test.txt",
+  "overall_metrics": {
+    "dice": 0.4611444380069583,
+    "dice_std": 0.17396196877520487,
+    "iou": 0.4442539267636531,
+    "iou_std": 0.15153181597887422,
+    "bce_loss": 0.00433111075232167,
+    "n_samples": 10866
+  },
+  "efficiency": {
+    "parameters_M": 17.261955,
+    "inference_time_ms": 4.126442000000017,
+    "fps": 242.33952640070936,
+    "gpu_memory_mb": 251.18603515625
+  },
+  "config": {
+    "batch_size": 4,
+    "input_shape": [
+      1,
+      1,
+      256,
+      256
+    ]
+  }
+}

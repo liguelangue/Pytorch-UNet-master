@@ -8,3 +8,4 @@ venv/
 .idea/
 wandb/
 test_results_muscle_binary/unet_muscle_90_final/predictions/
+test_results_muscle_3_classes/unet_muscle_3_classes/predictions/
