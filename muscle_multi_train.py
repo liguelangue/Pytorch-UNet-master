@@ -162,7 +162,7 @@ def main():
         
         # ✅ Save checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
-            checkpoint_path = os.path.join(CHECKPOINT_DIR, f'unet_muscle_90_epoch_{epoch+1}.pth')
+            checkpoint_path = os.path.join(CHECKPOINT_DIR, f'unet_muscle_3_classes_epoch_{epoch+1}.pth')
             torch.save(model.state_dict(), checkpoint_path)
             print(f"💾 Saved checkpoint at epoch {epoch+1}")
         
@@ -180,7 +180,7 @@ def main():
     plt.title('Training and Validation Loss')
     plt.legend()
     plt.grid(True)
-    plt.savefig(os.path.join(CHECKPOINT_DIR, 'loss_curve.png'))
+    plt.savefig(os.path.join(CHECKPOINT_DIR, 'loss_curve_3_classes.png'))
     plt.show()
 
 if __name__ == '__main__':
