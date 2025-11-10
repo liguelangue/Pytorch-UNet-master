@@ -1,19 +1,20 @@
 {
   "checkpoint": "./checkpoints/unet_muscle_3_classes.pth",
-  "dataset": "Muscle-Binary",
+  "dataset": "Muscle-Multi-Class",
   "split": "test.txt",
   "overall_metrics": {
-    "dice": 0.4813701134067908,
-    "dice_std": 0.19331926793357843,
-    "iou": 0.47160764680084805,
-    "iou_std": 0.18069923310041217,
-    "bce_loss": 0.0030823370294225287,
-    "n_samples": 10866
+    "dice_all_classes": 0.9812870988765957,
+    "dice_all_classes_std": 0.04902536791244259,
+    "iou_all_classes": 0.9713185606258647,
+    "iou_all_classes_std": 0.059131017869711484,
+    "crossentropy_loss": 0.0029799513950773877,
+    "n_samples": 10866,
+    "note": "Metrics calculated for all classes (background class 0 + muscle classes 1 & 2)"
   },
   "efficiency": {
     "parameters_M": 17.261955,
-    "inference_time_ms": 4.112842999999997,
-    "fps": 243.14081524629088,
+    "inference_time_ms": 4.152778999999974,
+    "fps": 240.80260471361618,
     "gpu_memory_mb": 251.18603515625
   },
   "config": {
