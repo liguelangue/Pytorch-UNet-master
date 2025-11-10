@@ -13,6 +13,7 @@ import numpy as np
 from tqdm import tqdm
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from pathlib import Path
 import csv
@@ -23,37 +24,181 @@ from muscle_dataset_multi import MuscleMRIDatasetMulti
 from efficiency_monitor import quick_check
 
 
-def dice_score_multi_class(pred, target, num_classes=3, smooth=1e-6):
-    """Calculate Dice score for multi-class segmentation"""
-    dice_scores = []
-    pred = torch.softmax(pred, dim=1)
+def compute_per_class_metrics(pred, target, num_classes, ignore_index=None):
+    """Compute per-class Dice and IoU scores for detailed analysis"""
+    per_class_dice = {}
+    per_class_iou = {}
+    
+    # Get hard predictions
+    if pred.dim() == 4:  # [B, C, H, W]
+        pred_soft = F.softmax(pred, dim=1)
+        pred_hard = torch.argmax(pred_soft, dim=1)
+    else:
+        pred_hard = pred
     
     for class_id in range(num_classes):
-        pred_class = pred[:, class_id]
+        if ignore_index is not None and class_id == ignore_index:
+            continue
+        
+        # Get binary masks for this class
+        pred_class = (pred_hard == class_id).float()
         target_class = (target == class_id).float()
         
-        intersection = (pred_class * target_class).sum(dim=(1, 2))
-        union = pred_class.sum(dim=(1, 2)) + target_class.sum(dim=(1, 2))
-        dice = (2. * intersection + smooth) / (union + smooth)
-        dice_scores.append(dice.mean().item())
+        # Calculate metrics
+        intersection = (pred_class * target_class).sum()
+        pred_sum = pred_class.sum()
+        target_sum = target_class.sum()
+        union = pred_sum + target_sum - intersection
+        
+        # Dice score
+        if target_sum == 0 and pred_sum == 0:
+            dice = 1.0
+        elif target_sum == 0 or pred_sum == 0:
+            dice = 0.0
+        else:
+            dice = (2.0 * intersection / (pred_sum + target_sum)).item()
+        
+        # IoU score  
+        if union == 0:
+            iou = 1.0
+        else:
+            iou = (intersection / union).item()
+        
+        per_class_dice[class_id] = dice
+        per_class_iou[class_id] = iou
     
-    return np.mean(dice_scores)
+    return per_class_dice, per_class_iou
 
-def iou_score_multi_class(pred, target, num_classes=3, smooth=1e-6):
-    """Calculate IoU score for multi-class segmentation"""
-    iou_scores = []
-    pred = torch.softmax(pred, dim=1)
+
+def dice_score_multiclass_correct(pred, target, num_classes, ignore_index=None, smooth=1e-5):
+    """
+    Calculate Dice score for multi-class segmentation - CORRECTED VERSION
+    Properly handles classes that don't exist in the image
+    
+    Args:
+        pred: [B, C, H, W] raw logits
+        target: [B, H, W] class indices
+        num_classes: number of classes
+        ignore_index: class to ignore (default None - include all classes)
+    """
+    dice_scores = []
+    
+    # Apply softmax to get probabilities, then argmax for hard predictions
+    pred_soft = F.softmax(pred, dim=1)
+    pred_hard = torch.argmax(pred_soft, dim=1)  # [B, H, W]
     
     for class_id in range(num_classes):
-        pred_class = pred[:, class_id]
+        # Only skip if explicitly set to ignore
+        if ignore_index is not None and class_id == ignore_index:
+            continue
+        
+        # Get binary masks for this class
+        pred_class = (pred_hard == class_id).float()
         target_class = (target == class_id).float()
         
-        intersection = (pred_class * target_class).sum(dim=(1, 2))
-        union = pred_class.sum(dim=(1, 2)) + target_class.sum(dim=(1, 2)) - intersection
-        iou = (intersection + smooth) / (union + smooth)
-        iou_scores.append(iou.mean().item())
+        # Count pixels
+        pred_sum = pred_class.sum()
+        target_sum = target_class.sum()
+        intersection = (pred_class * target_class).sum()
+        
+        # Handle different cases
+        if target_sum == 0 and pred_sum == 0:
+            # Class doesn't exist and model correctly predicts it doesn't exist
+            dice = torch.tensor(1.0, device=pred.device)
+        elif target_sum == 0 and pred_sum > 0:
+            # Class doesn't exist but model wrongly predicts it exists
+            dice = torch.tensor(0.0, device=pred.device)
+        elif target_sum > 0 and pred_sum == 0:
+            # Class exists but model fails to predict it
+            dice = torch.tensor(0.0, device=pred.device)
+        else:
+            # Normal case: class exists and model makes predictions
+            dice = (2.0 * intersection + smooth) / (pred_sum + target_sum + smooth)
+        
+        dice_scores.append(dice)
     
-    return np.mean(iou_scores)
+    if dice_scores:
+        return torch.stack(dice_scores).mean()
+    else:
+        return torch.tensor(1.0, device=pred.device)  # All classes ignored - perfect
+
+
+def iou_score_multiclass_correct(pred, target, num_classes, ignore_index=None, smooth=1e-5):
+    """
+    Calculate IoU score for multi-class segmentation - CORRECTED VERSION
+    Properly handles classes that don't exist in the image
+    """
+    iou_scores = []
+    
+    # Apply softmax and get hard predictions
+    pred = F.softmax(pred, dim=1)
+    pred = torch.argmax(pred, dim=1)  # [B, H, W]
+    
+    for class_id in range(num_classes):
+        # Only skip if explicitly set to ignore
+        if ignore_index is not None and class_id == ignore_index:
+            continue
+        
+        # Get binary masks for this class
+        pred_class = (pred == class_id).float()
+        target_class = (target == class_id).float()
+        
+        # Count pixels
+        pred_sum = pred_class.sum()
+        target_sum = target_class.sum()
+        intersection = (pred_class * target_class).sum()
+        union = pred_sum + target_sum - intersection
+        
+        # Handle different cases
+        if target_sum == 0 and pred_sum == 0:
+            # Class doesn't exist and model correctly predicts it doesn't exist
+            iou = torch.tensor(1.0, device=pred.device)
+        elif union == 0:
+            # Shouldn't happen, but handle edge case
+            iou = torch.tensor(1.0, device=pred.device)
+        else:
+            # Normal IoU calculation
+            iou = (intersection + smooth) / (union + smooth)
+        
+        iou_scores.append(iou)
+    
+    if iou_scores:
+        return torch.stack(iou_scores).mean()
+    else:
+        return torch.tensor(1.0, device=pred.device)  # All classes ignored - perfect
+
+
+# Backward compatibility aliases
+def dice_score_multi_class(pred, target, num_classes=3, smooth=1e-6, ignore_background=True):
+    """
+    Calculate Dice score for multi-class segmentation (backward compatibility)
+    
+    Args:
+        pred: [B, C, H, W] raw logits
+        target: [B, H, W] class indices
+        num_classes: number of classes
+        smooth: smoothing factor
+        ignore_background: If True, ignore class 0 (background) in metric calculation
+    """
+    ignore_index = 0 if ignore_background else None
+    result = dice_score_multiclass_correct(pred, target, num_classes, ignore_index=ignore_index, smooth=smooth)
+    return result.item() if isinstance(result, torch.Tensor) else result
+
+
+def iou_score_multi_class(pred, target, num_classes=3, smooth=1e-6, ignore_background=True):
+    """
+    Calculate IoU score for multi-class segmentation (backward compatibility)
+    
+    Args:
+        pred: [B, C, H, W] raw logits
+        target: [B, H, W] class indices
+        num_classes: number of classes
+        smooth: smoothing factor
+        ignore_background: If True, ignore class 0 (background) in metric calculation
+    """
+    ignore_index = 0 if ignore_background else None
+    result = iou_score_multiclass_correct(pred, target, num_classes, ignore_index=ignore_index, smooth=smooth)
+    return result.item() if isinstance(result, torch.Tensor) else result
 
 
 def main():
@@ -122,7 +267,7 @@ def main():
     results_dir.mkdir(parents=True, exist_ok=True)
     
     # Metrics storage
-    csv_rows = [["filename", "dice", "iou", "bce_loss"]]
+    csv_rows = [["filename", "dice_all_classes", "iou_all_classes", "crossentropy_loss"]]
     
     # Overall metrics list
     dice_list, iou_list, loss_list = [], [], []
@@ -146,10 +291,6 @@ def main():
             
             # Calculate batch loss
             batch_loss = criterion(logits, masks)
-            
-            # Calculate metrics for each sample
-            dice_scores = dice_score_multi_class(logits, masks, num_classes=3)
-            iou_scores = iou_score_multi_class(logits, masks, num_classes=3)
             
             # Save predictions (if needed)
             if SAVE_PNG:
@@ -192,11 +333,17 @@ def main():
                     fname = f"{patient_num}_{slice_num}.png"
                     cv2.imwrite(str(pred_dir / fname), pred_mask)
             
-            # Process each sample
+            # Process each sample individually
             for i in range(images.size(0)):
                 filename = filenames[i]
-                dice_val = dice_scores  # Multi-class function returns single value
-                iou_val = iou_scores    # Multi-class function returns single value
+                
+                # Extract single image and mask for per-image metric calculation
+                single_logit = logits[i:i+1]  # Keep batch dimension [1, C, H, W]
+                single_mask = masks[i:i+1]    # Keep batch dimension [1, H, W]
+                
+                # Calculate metrics for this single image (including all classes)
+                dice_val = dice_score_multi_class(single_logit, single_mask, num_classes=3, ignore_background=False)
+                iou_val = iou_score_multi_class(single_logit, single_mask, num_classes=3, ignore_background=False)
                 loss_val = batch_loss.item()  # Batch-level loss
                 
                 # Store overall metrics
@@ -228,9 +375,10 @@ def main():
     print(f"{'='*60}")
     
     print(f"\n📊 OVERALL PERFORMANCE:")
-    print(f"   BCE Loss : {mean_loss:.6f}")
-    print(f"   Mean Dice: {mean_dice:.4f} ± {np.std(dice_list):.4f}")
-    print(f"   Mean IoU : {mean_iou:.4f} ± {np.std(iou_list):.4f}")
+    print(f"   CrossEntropy Loss : {mean_loss:.6f}")
+    print(f"   Mean Dice (all classes): {mean_dice:.4f} ± {np.std(dice_list):.4f}")
+    print(f"   Mean IoU (all classes) : {mean_iou:.4f} ± {np.std(iou_list):.4f}")
+    print(f"   Note: Metrics calculated for all classes (background + muscles)")
     
     
     print(f"\n📊 EFFICIENCY METRICS:")
@@ -248,15 +396,16 @@ def main():
     # Save summary JSON
     summary = {
         "checkpoint": CHECKPOINT,
-        "dataset": "Muscle-Binary",
+        "dataset": "Muscle-Multi-Class",
         "split": os.path.basename(SPLIT_TXT),
         "overall_metrics": {
-            "dice": float(mean_dice),
-            "dice_std": float(np.std(dice_list)),
-            "iou": float(mean_iou),
-            "iou_std": float(np.std(iou_list)),
-            "bce_loss": float(mean_loss),
-            "n_samples": len(dice_list)
+            "dice_all_classes": float(mean_dice),
+            "dice_all_classes_std": float(np.std(dice_list)),
+            "iou_all_classes": float(mean_iou),
+            "iou_all_classes_std": float(np.std(iou_list)),
+            "crossentropy_loss": float(mean_loss),
+            "n_samples": len(dice_list),
+            "note": "Metrics calculated for all classes (background class 0 + muscle classes 1 & 2)"
         },
         "efficiency": {
             "parameters_M": efficiency_results['total_params']/1e6,
