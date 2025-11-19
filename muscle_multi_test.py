@@ -22,192 +22,23 @@ import json
 from unet import UNet
 from muscle_dataset_multi import MuscleMRIDatasetMulti
 from efficiency_monitor import quick_check
-
-
-def compute_per_class_metrics(pred, target, num_classes, ignore_index=None):
-    """Compute per-class Dice and IoU scores for detailed analysis"""
-    per_class_dice = {}
-    per_class_iou = {}
-    
-    # Get hard predictions
-    if pred.dim() == 4:  # [B, C, H, W]
-        pred_soft = F.softmax(pred, dim=1)
-        pred_hard = torch.argmax(pred_soft, dim=1)
-    else:
-        pred_hard = pred
-    
-    for class_id in range(num_classes):
-        if ignore_index is not None and class_id == ignore_index:
-            continue
-        
-        # Get binary masks for this class
-        pred_class = (pred_hard == class_id).float()
-        target_class = (target == class_id).float()
-        
-        # Calculate metrics
-        intersection = (pred_class * target_class).sum()
-        pred_sum = pred_class.sum()
-        target_sum = target_class.sum()
-        union = pred_sum + target_sum - intersection
-        
-        # Dice score
-        if target_sum == 0 and pred_sum == 0:
-            dice = 1.0
-        elif target_sum == 0 or pred_sum == 0:
-            dice = 0.0
-        else:
-            dice = (2.0 * intersection / (pred_sum + target_sum)).item()
-        
-        # IoU score  
-        if union == 0:
-            iou = 1.0
-        else:
-            iou = (intersection / union).item()
-        
-        per_class_dice[class_id] = dice
-        per_class_iou[class_id] = iou
-    
-    return per_class_dice, per_class_iou
-
-
-def dice_score_multiclass_correct(pred, target, num_classes, ignore_index=None, smooth=1e-5):
-    """
-    Calculate Dice score for multi-class segmentation - CORRECTED VERSION
-    Properly handles classes that don't exist in the image
-    
-    Args:
-        pred: [B, C, H, W] raw logits
-        target: [B, H, W] class indices
-        num_classes: number of classes
-        ignore_index: class to ignore (default None - include all classes)
-    """
-    dice_scores = []
-    
-    # Apply softmax to get probabilities, then argmax for hard predictions
-    pred_soft = F.softmax(pred, dim=1)
-    pred_hard = torch.argmax(pred_soft, dim=1)  # [B, H, W]
-    
-    for class_id in range(num_classes):
-        # Only skip if explicitly set to ignore
-        if ignore_index is not None and class_id == ignore_index:
-            continue
-        
-        # Get binary masks for this class
-        pred_class = (pred_hard == class_id).float()
-        target_class = (target == class_id).float()
-        
-        # Count pixels
-        pred_sum = pred_class.sum()
-        target_sum = target_class.sum()
-        intersection = (pred_class * target_class).sum()
-        
-        # Handle different cases
-        if target_sum == 0 and pred_sum == 0:
-            # Class doesn't exist and model correctly predicts it doesn't exist
-            dice = torch.tensor(1.0, device=pred.device)
-        elif target_sum == 0 and pred_sum > 0:
-            # Class doesn't exist but model wrongly predicts it exists
-            dice = torch.tensor(0.0, device=pred.device)
-        elif target_sum > 0 and pred_sum == 0:
-            # Class exists but model fails to predict it
-            dice = torch.tensor(0.0, device=pred.device)
-        else:
-            # Normal case: class exists and model makes predictions
-            dice = (2.0 * intersection + smooth) / (pred_sum + target_sum + smooth)
-        
-        dice_scores.append(dice)
-    
-    if dice_scores:
-        return torch.stack(dice_scores).mean()
-    else:
-        return torch.tensor(1.0, device=pred.device)  # All classes ignored - perfect
-
-
-def iou_score_multiclass_correct(pred, target, num_classes, ignore_index=None, smooth=1e-5):
-    """
-    Calculate IoU score for multi-class segmentation - CORRECTED VERSION
-    Properly handles classes that don't exist in the image
-    """
-    iou_scores = []
-    
-    # Apply softmax and get hard predictions
-    pred = F.softmax(pred, dim=1)
-    pred = torch.argmax(pred, dim=1)  # [B, H, W]
-    
-    for class_id in range(num_classes):
-        # Only skip if explicitly set to ignore
-        if ignore_index is not None and class_id == ignore_index:
-            continue
-        
-        # Get binary masks for this class
-        pred_class = (pred == class_id).float()
-        target_class = (target == class_id).float()
-        
-        # Count pixels
-        pred_sum = pred_class.sum()
-        target_sum = target_class.sum()
-        intersection = (pred_class * target_class).sum()
-        union = pred_sum + target_sum - intersection
-        
-        # Handle different cases
-        if target_sum == 0 and pred_sum == 0:
-            # Class doesn't exist and model correctly predicts it doesn't exist
-            iou = torch.tensor(1.0, device=pred.device)
-        elif union == 0:
-            # Shouldn't happen, but handle edge case
-            iou = torch.tensor(1.0, device=pred.device)
-        else:
-            # Normal IoU calculation
-            iou = (intersection + smooth) / (union + smooth)
-        
-        iou_scores.append(iou)
-    
-    if iou_scores:
-        return torch.stack(iou_scores).mean()
-    else:
-        return torch.tensor(1.0, device=pred.device)  # All classes ignored - perfect
-
-
-# Backward compatibility aliases
-def dice_score_multi_class(pred, target, num_classes=3, smooth=1e-6, ignore_background=True):
-    """
-    Calculate Dice score for multi-class segmentation (backward compatibility)
-    
-    Args:
-        pred: [B, C, H, W] raw logits
-        target: [B, H, W] class indices
-        num_classes: number of classes
-        smooth: smoothing factor
-        ignore_background: If True, ignore class 0 (background) in metric calculation
-    """
-    ignore_index = 0 if ignore_background else None
-    result = dice_score_multiclass_correct(pred, target, num_classes, ignore_index=ignore_index, smooth=smooth)
-    return result.item() if isinstance(result, torch.Tensor) else result
-
-
-def iou_score_multi_class(pred, target, num_classes=3, smooth=1e-6, ignore_background=True):
-    """
-    Calculate IoU score for multi-class segmentation (backward compatibility)
-    
-    Args:
-        pred: [B, C, H, W] raw logits
-        target: [B, H, W] class indices
-        num_classes: number of classes
-        smooth: smoothing factor
-        ignore_background: If True, ignore class 0 (background) in metric calculation
-    """
-    ignore_index = 0 if ignore_background else None
-    result = iou_score_multiclass_correct(pred, target, num_classes, ignore_index=ignore_index, smooth=smooth)
-    return result.item() if isinstance(result, torch.Tensor) else result
+from utils.eval import (
+    hd95_numpy,
+    compute_per_class_metrics,
+    compute_per_class_hd95,
+    compute_overall_hd95,
+    dice_score_multi_class,
+    iou_score_multi_class
+)
 
 
 def main():
     # Hardcoded paths
-    IMAGE_DIR = r'C:\Users\DUDU\Documents\MIG\dataset\muscle_top3\test\images'
-    MASK_DIR = r'C:\Users\DUDU\Documents\MIG\dataset\muscle_top3\test\masks'
-    SPLIT_TXT = r'C:\Users\DUDU\Documents\MIG\dataset\muscle_top3\splits\test.txt'
-    CHECKPOINT = './checkpoints/unet_muscle_3_classes.pth'
-    RESULTS_DIR = './test_results_muscle_3_classes'
+    IMAGE_DIR = r'C:\Users\DUDU\Documents\MIG\dataset\muscle_top10\test\images'
+    MASK_DIR = r'C:\Users\DUDU\Documents\MIG\dataset\muscle_top10\test\masks'
+    SPLIT_TXT = r'C:\Users\DUDU\Documents\MIG\dataset\muscle_top10\splits\test.txt'
+    CHECKPOINT = './checkpoints/unet_muscle_10_classes.pth'
+    RESULTS_DIR = './test_results_muscle_10_classes'
     BATCH_SIZE = 4
     NUM_WORKERS = 4
     SAVE_PNG = True
@@ -224,7 +55,7 @@ def main():
         transform=None,
         target_size=target_size,
         search_subfolders=True,
-        num_classes=3
+        num_classes=11  # 10 muscles + 1 background = 11 total classes
     )
     test_loader = DataLoader(test_dataset,
                              batch_size=BATCH_SIZE,
@@ -233,7 +64,7 @@ def main():
                              pin_memory=True)
     
     # Model
-    model = UNet(n_channels=1, n_classes=3, bilinear=True).to(device)  # 3 classes: background, muscle1, muscle2
+    model = UNet(n_channels=1, n_classes=11, bilinear=True).to(device)  # 11 classes: background + 10 muscles
     if not os.path.isfile(CHECKPOINT):
         raise FileNotFoundError(f"Checkpoint '{CHECKPOINT}' not found!")
     
@@ -267,10 +98,14 @@ def main():
     results_dir.mkdir(parents=True, exist_ok=True)
     
     # Metrics storage
-    csv_rows = [["filename", "dice_all_classes", "iou_all_classes", "crossentropy_loss"]]
+    csv_rows = [["filename", "dice_all_classes", "iou_all_classes", "hd95_all_classes", 
+                 "hd95_class0", "hd95_class1", "hd95_class2", "hd95_class3", "hd95_class4", "hd95_class5",
+                 "hd95_class6", "hd95_class7", "hd95_class8", "hd95_class9", "hd95_class10", 
+                 "crossentropy_loss"]]
     
     # Overall metrics list
-    dice_list, iou_list, loss_list = [], [], []
+    dice_list, iou_list, hd95_list, loss_list = [], [], [], []
+    per_class_hd95_all = {i: [] for i in range(11)}  # Track per-class HD95 across all images (11 classes)
     
     # Prediction save directory
     if SAVE_PNG:
@@ -323,10 +158,18 @@ def main():
                         if slice_part.startswith('slice_'):
                             slice_num = slice_part[6:]  # Remove 'slice_' prefix
                     
-                    # Scale class predictions to original values (0, 21, 90)
+                    # Scale class predictions to original values (0, 21, 34, 76, 90, 96, 200, 214, 241, 248, 255)
                     pred_mask = preds_np[i].astype(np.uint8)
-                    pred_mask[pred_mask == 1] = 21  # Muscle class 1
-                    pred_mask[pred_mask == 2] = 90  # Muscle class 2
+                    pred_mask[pred_mask == 1] = 21   # Muscle class 1
+                    pred_mask[pred_mask == 2] = 34   # Muscle class 2
+                    pred_mask[pred_mask == 3] = 76   # Muscle class 3
+                    pred_mask[pred_mask == 4] = 90   # Muscle class 4
+                    pred_mask[pred_mask == 5] = 96   # Muscle class 5
+                    pred_mask[pred_mask == 6] = 200  # Muscle class 6
+                    pred_mask[pred_mask == 7] = 214  # Muscle class 7
+                    pred_mask[pred_mask == 8] = 241  # Muscle class 8
+                    pred_mask[pred_mask == 9] = 248  # Muscle class 9
+                    pred_mask[pred_mask == 10] = 255  # Muscle class 10
                     # Class 0 remains 0 (background)
                     
                     # Create filename in format: 001_0000.png
@@ -342,16 +185,46 @@ def main():
                 single_mask = masks[i:i+1]    # Keep batch dimension [1, H, W]
                 
                 # Calculate metrics for this single image (including all classes)
-                dice_val = dice_score_multi_class(single_logit, single_mask, num_classes=3, ignore_background=False)
-                iou_val = iou_score_multi_class(single_logit, single_mask, num_classes=3, ignore_background=False)
+                dice_val = dice_score_multi_class(single_logit, single_mask, num_classes=11, ignore_background=False)
+                iou_val = iou_score_multi_class(single_logit, single_mask, num_classes=11, ignore_background=False)
                 loss_val = batch_loss.item()  # Batch-level loss
+                
+                # Calculate per-class HD95 (including background)
+                per_class_hd95 = compute_per_class_hd95(single_logit, single_mask, num_classes=11, ignore_index=None)
+                
+                # Calculate overall HD95 (treating all classes as one binary mask) - more memory efficient
+                hd95_val = compute_overall_hd95(single_logit, single_mask, ignore_background=False, num_classes=11)
+                if np.isinf(hd95_val):
+                    hd95_val = float('inf')
+                
+                # Store per-class HD95 values
+                hd95_classes = [per_class_hd95.get(i, float('inf')) for i in range(11)]
+                
+                # Track per-class HD95 for overall statistics
+                for class_id in range(11):
+                    hd95_val_class = hd95_classes[class_id]
+                    if not np.isinf(hd95_val_class):
+                        per_class_hd95_all[class_id].append(hd95_val_class)
                 
                 # Store overall metrics
                 dice_list.append(dice_val)
                 iou_list.append(iou_val)
+                hd95_list.append(hd95_val)
                 loss_list.append(loss_val)
                 csv_rows.append([filename, f"{dice_val:.4f}", 
-                               f"{iou_val:.4f}", f"{loss_val:.6f}"])
+                               f"{iou_val:.4f}", f"{hd95_val:.4f}" if not np.isinf(hd95_val) else "inf",
+                               f"{hd95_classes[0]:.4f}" if not np.isinf(hd95_classes[0]) else "inf",
+                               f"{hd95_classes[1]:.4f}" if not np.isinf(hd95_classes[1]) else "inf",
+                               f"{hd95_classes[2]:.4f}" if not np.isinf(hd95_classes[2]) else "inf",
+                               f"{hd95_classes[3]:.4f}" if not np.isinf(hd95_classes[3]) else "inf",
+                               f"{hd95_classes[4]:.4f}" if not np.isinf(hd95_classes[4]) else "inf",
+                               f"{hd95_classes[5]:.4f}" if not np.isinf(hd95_classes[5]) else "inf",
+                               f"{hd95_classes[6]:.4f}" if not np.isinf(hd95_classes[6]) else "inf",
+                               f"{hd95_classes[7]:.4f}" if not np.isinf(hd95_classes[7]) else "inf",
+                               f"{hd95_classes[8]:.4f}" if not np.isinf(hd95_classes[8]) else "inf",
+                               f"{hd95_classes[9]:.4f}" if not np.isinf(hd95_classes[9]) else "inf",
+                               f"{hd95_classes[10]:.4f}" if not np.isinf(hd95_classes[10]) else "inf",
+                               f"{loss_val:.6f}"])
             
             pbar.set_postfix(loss=batch_loss.item())
             pbar.update()
@@ -359,9 +232,32 @@ def main():
     # Calculate overall mean
     mean_dice = np.mean(dice_list)
     mean_iou = np.mean(iou_list)
+    # HD95: exclude infinite values when calculating mean
+    hd95_valid = [h for h in hd95_list if not np.isinf(h)]
+    mean_hd95 = np.mean(hd95_valid) if hd95_valid else float('inf')
     mean_loss = np.mean(loss_list)
     
+    # Calculate per-class HD95 means
+    mean_hd95_per_class = []
+    for class_id in range(11):
+        if per_class_hd95_all[class_id]:
+            mean_hd95_per_class.append(np.mean(per_class_hd95_all[class_id]))
+        else:
+            mean_hd95_per_class.append(float('inf'))
+    
     csv_rows.append(["AVERAGE", f"{mean_dice:.4f}", f"{mean_iou:.4f}", 
+                    f"{mean_hd95:.4f}" if not np.isinf(mean_hd95) else "inf",
+                    f"{mean_hd95_per_class[0]:.4f}" if not np.isinf(mean_hd95_per_class[0]) else "inf",
+                    f"{mean_hd95_per_class[1]:.4f}" if not np.isinf(mean_hd95_per_class[1]) else "inf",
+                    f"{mean_hd95_per_class[2]:.4f}" if not np.isinf(mean_hd95_per_class[2]) else "inf",
+                    f"{mean_hd95_per_class[3]:.4f}" if not np.isinf(mean_hd95_per_class[3]) else "inf",
+                    f"{mean_hd95_per_class[4]:.4f}" if not np.isinf(mean_hd95_per_class[4]) else "inf",
+                    f"{mean_hd95_per_class[5]:.4f}" if not np.isinf(mean_hd95_per_class[5]) else "inf",
+                    f"{mean_hd95_per_class[6]:.4f}" if not np.isinf(mean_hd95_per_class[6]) else "inf",
+                    f"{mean_hd95_per_class[7]:.4f}" if not np.isinf(mean_hd95_per_class[7]) else "inf",
+                    f"{mean_hd95_per_class[8]:.4f}" if not np.isinf(mean_hd95_per_class[8]) else "inf",
+                    f"{mean_hd95_per_class[9]:.4f}" if not np.isinf(mean_hd95_per_class[9]) else "inf",
+                    f"{mean_hd95_per_class[10]:.4f}" if not np.isinf(mean_hd95_per_class[10]) else "inf",
                     f"{mean_loss:.6f}"])
     
     # Save CSV file
@@ -378,7 +274,20 @@ def main():
     print(f"   CrossEntropy Loss : {mean_loss:.6f}")
     print(f"   Mean Dice (all classes): {mean_dice:.4f} ± {np.std(dice_list):.4f}")
     print(f"   Mean IoU (all classes) : {mean_iou:.4f} ± {np.std(iou_list):.4f}")
-    print(f"   Note: Metrics calculated for all classes (background + muscles)")
+    if not np.isinf(mean_hd95):
+        print(f"   Mean HD95 (all classes)    : {mean_hd95:.4f} ± {np.std(hd95_valid):.4f}")
+    else:
+        print(f"   Mean HD95 (all classes)    : inf (no valid values)")
+    # print(f"\n📊 PER-CLASS HD95:")
+    # class_names = ["Background", "Muscle1", "Muscle2", "Muscle3", "Muscle4", "Muscle5"]
+    # for class_id in range(6):
+    #     if per_class_hd95_all[class_id]:
+    #         mean_val = mean_hd95_per_class[class_id]
+    #         std_val = np.std(per_class_hd95_all[class_id])
+    #         print(f"   HD95 {class_names[class_id]} (class {class_id}): {mean_val:.4f} ± {std_val:.4f}")
+    #     else:
+    #         print(f"   HD95 {class_names[class_id]} (class {class_id}): inf (no valid values)")
+    print(f"   Note: Metrics calculated for all classes (including background). HD95 computed per class.")
     
     
     print(f"\n📊 EFFICIENCY METRICS:")
@@ -403,9 +312,17 @@ def main():
             "dice_all_classes_std": float(np.std(dice_list)),
             "iou_all_classes": float(mean_iou),
             "iou_all_classes_std": float(np.std(iou_list)),
+            "hd95_all_classes": float(mean_hd95) if not np.isinf(mean_hd95) else None,
+            "hd95_all_classes_std": float(np.std(hd95_valid)) if hd95_valid else None,
+            "hd95_per_class": {
+                f"class_{i}_{'background' if i == 0 else f'muscle{i}'}": {
+                    "mean": float(mean_hd95_per_class[i]) if not np.isinf(mean_hd95_per_class[i]) else None,
+                    "std": float(np.std(per_class_hd95_all[i])) if per_class_hd95_all[i] else None
+                } for i in range(11)
+            },
             "crossentropy_loss": float(mean_loss),
             "n_samples": len(dice_list),
-            "note": "Metrics calculated for all classes (background class 0 + muscle classes 1 & 2)"
+            "note": "Metrics calculated for all classes (background class 0 + muscle classes 1-10). HD95 calculated per class including background."
         },
         "efficiency": {
             "parameters_M": efficiency_results['total_params']/1e6,

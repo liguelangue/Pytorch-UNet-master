@@ -1,0 +1,57 @@
+{
+  "checkpoint": "./checkpoints/unet_muscle_5_classes.pth",
+  "dataset": "Muscle-Multi-Class",
+  "split": "test.txt",
+  "overall_metrics": {
+    "dice_all_classes": 0.9584012653328274,
+    "dice_all_classes_std": 0.05098004717000356,
+    "iou_all_classes": 0.9400112585711606,
+    "iou_all_classes_std": 0.05950757692745105,
+    "hd95_all_classes": 0.4626651481510342,
+    "hd95_all_classes_std": 0.755113983839926,
+    "hd95_per_class": {
+      "class_0_background": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "class_1_muscle1": {
+        "mean": 0.7002838015626487,
+        "std": 2.5932037737220295
+      },
+      "class_2_muscle2": {
+        "mean": 0.3440673792405609,
+        "std": 1.0128986012739654
+      },
+      "class_3_muscle3": {
+        "mean": 0.40199748928299983,
+        "std": 2.0041734329673164
+      },
+      "class_4_muscle4": {
+        "mean": 0.6633307392463751,
+        "std": 2.1141563856036782
+      },
+      "class_5_muscle5": {
+        "mean": 0.6663114795736208,
+        "std": 2.1119447509390685
+      }
+    },
+    "crossentropy_loss": 0.008191788823949471,
+    "n_samples": 10866,
+    "note": "Metrics calculated for all classes (background class 0 + muscle classes 1-5). HD95 calculated per class including background."
+  },
+  "efficiency": {
+    "parameters_M": 17.26215,
+    "inference_time_ms": 4.221031000000002,
+    "fps": 236.90894475780908,
+    "gpu_memory_mb": 252.43701171875
+  },
+  "config": {
+    "batch_size": 4,
+    "input_shape": [
+      1,
+      1,
+      256,
+      256
+    ]
+  }
+}

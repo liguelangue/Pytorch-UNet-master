@@ -1,0 +1,77 @@
+{
+  "checkpoint": "./checkpoints/unet_muscle_10_classes.pth",
+  "dataset": "Muscle-Multi-Class",
+  "split": "test.txt",
+  "overall_metrics": {
+    "dice_all_classes": 0.947220253918067,
+    "dice_all_classes_std": 0.0609017186603671,
+    "iou_all_classes": 0.9274791825625113,
+    "iou_all_classes_std": 0.07248832142431098,
+    "hd95_all_classes": 0.48414527331853374,
+    "hd95_all_classes_std": 0.6446340417907666,
+    "hd95_per_class": {
+      "class_0_background": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "class_1_muscle1": {
+        "mean": 0.7004336399934855,
+        "std": 2.934627262129277
+      },
+      "class_2_muscle2": {
+        "mean": 0.2691351275020457,
+        "std": 0.7753323121819237
+      },
+      "class_3_muscle3": {
+        "mean": 0.30732011727993186,
+        "std": 1.0810163312674081
+      },
+      "class_4_muscle4": {
+        "mean": 0.35380795104910284,
+        "std": 1.0551919936054148
+      },
+      "class_5_muscle5": {
+        "mean": 0.46764153383051094,
+        "std": 2.0553632949941534
+      },
+      "class_6_muscle6": {
+        "mean": 0.39914267346731647,
+        "std": 1.3489746836789034
+      },
+      "class_7_muscle7": {
+        "mean": 0.7028157231475077,
+        "std": 2.1176658128904338
+      },
+      "class_8_muscle8": {
+        "mean": 0.7588315889583674,
+        "std": 2.733725380921075
+      },
+      "class_9_muscle9": {
+        "mean": 0.6704225846640972,
+        "std": 2.20554791218711
+      },
+      "class_10_muscle10": {
+        "mean": 0.6960470666115055,
+        "std": 2.4522223367771696
+      }
+    },
+    "crossentropy_loss": 0.013163322730727805,
+    "n_samples": 10866,
+    "note": "Metrics calculated for all classes (background class 0 + muscle classes 1-10). HD95 calculated per class including background."
+  },
+  "efficiency": {
+    "parameters_M": 17.262475,
+    "inference_time_ms": 4.07488100000001,
+    "fps": 245.4059394617898,
+    "gpu_memory_mb": 253.18994140625
+  },
+  "config": {
+    "batch_size": 4,
+    "input_shape": [
+      1,
+      1,
+      256,
+      256
+    ]
+  }
+}

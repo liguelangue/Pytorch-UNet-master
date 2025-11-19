@@ -16,11 +16,37 @@ class MuscleMRIDatasetMulti(Dataset):
         self.num_classes = num_classes
         
         # Define color to class mapping based on your analysis
-        self.color_to_class = {
-            (0, 0, 0): 0,        # Background (black)
-            (21, 21, 21): 1,     # Muscle #21 class 1 (gray value 21)
-            (90, 90, 90): 2,     # Muscle #90 class 2 (gray value 90)
-        }
+        if self.num_classes == 3:
+            self.color_to_class = {
+                (0, 0, 0): 0,        # Background (black)
+                (21, 21, 21): 1,     # Muscle #21 class 1 (gray value 21)
+                (90, 90, 90): 2,     # Muscle #90 class 2 (gray value 90)
+            }
+        elif self.num_classes == 6:
+            self.color_to_class = {
+                (0, 0, 0): 0,        # Background (black)
+                (21, 21, 21): 1,     # Muscle #21 class 1 (gray value 21)
+                (90, 90, 90): 2,     # Muscle #90 class 2 (gray value 90)
+                (96, 96, 96): 3,     # Muscle #96 class 3 (gray value 96)
+                (214, 214, 214): 4,     # Muscle #214 class 4 (gray value 214)
+                (248, 248, 248): 5,     # Muscle #248 class 5 (gray value 248)
+            }
+        elif self.num_classes == 11:
+            self.color_to_class = {
+                (0, 0, 0): 0,        # Background (black)
+                (21, 21, 21): 1,     # Muscle #21 class 1 (gray value 21)
+                (34, 34, 34): 2,     # Muscle #34 class 2 (gray value 34)
+                (76, 76, 76): 3,     # Muscle #76 class 3 (gray value 76)
+                (90, 90, 90): 4,     # Muscle #90 class 4 (gray value 90)
+                (96, 96, 96): 5,     # Muscle #96 class 5 (gray value 96)
+                (200, 200, 200): 6,     # Muscle #200 class 6 (gray value 200)
+                (214, 214, 214): 7,     # Muscle #214 class 7 (gray value 214)
+                (241, 241, 241): 8,     # Muscle #241 class 8 (gray value 241)
+                (248, 248, 248): 9,     # Muscle #248 class 9 (gray value 248)
+                (255, 255, 255): 10,     # Muscle #255 class 10 (gray value 255)
+            }
+        else:
+            raise ValueError(f"Unsupported num_classes={self.num_classes}.")
         
         # If search_subfolders is True, find all images recursively
         if self.search_subfolders:

@@ -3,18 +3,34 @@
   "dataset": "Muscle-Multi-Class",
   "split": "test.txt",
   "overall_metrics": {
-    "dice_all_classes": 0.9812870988765957,
-    "dice_all_classes_std": 0.04902536791244259,
-    "iou_all_classes": 0.9713185606258647,
-    "iou_all_classes_std": 0.059131017869711484,
-    "crossentropy_loss": 0.0029799513950773877,
+    "dice_all_classes": 0.9700977620489576,
+    "dice_all_classes_std": 0.06779174165695652,
+    "iou_all_classes": 0.9569290866953616,
+    "iou_all_classes_std": 0.0802608175049806,
+    "hd95_all_classes": 0.34818474285045214,
+    "hd95_all_classes_std": 1.0117683822304566,
+    "hd95_per_class": {
+      "class_0_background": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "class_1_muscle1": {
+        "mean": 0.6181914649212018,
+        "std": 2.5003707583026844
+      },
+      "class_2_muscle2": {
+        "mean": 0.4263627636301546,
+        "std": 1.6492266151976287
+      }
+    },
+    "crossentropy_loss": 0.0042496166384728,
     "n_samples": 10866,
-    "note": "Metrics calculated for all classes (background class 0 + muscle classes 1 & 2)"
+    "note": "Metrics calculated for all classes (background class 0 + muscle classes 1 & 2). HD95 calculated per class including background."
   },
   "efficiency": {
     "parameters_M": 17.261955,
-    "inference_time_ms": 4.152778999999974,
-    "fps": 240.80260471361618,
+    "inference_time_ms": 4.111305000000002,
+    "fps": 243.23177190697342,
     "gpu_memory_mb": 251.18603515625
   },
   "config": {
