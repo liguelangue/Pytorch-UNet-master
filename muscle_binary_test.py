@@ -2,7 +2,7 @@
 muscle_binary_test.py
 
 - Loads best or specified weights
-- Computes BCE Loss, Dice, IoU for all test images
+- Computes BCE Loss, Dice, IoU, HD95 for all test images
 - Overall metrics and per-image results
 - Optional save predictions as PNG
 """
@@ -21,6 +21,7 @@ import json
 from unet import UNet
 from muscle_dataset import MuscleMRIDataset
 from efficiency_monitor import quick_check
+from utils.eval import hd95_numpy
 
 
 def dice_score(pred, target, smooth: float = 1e-6):
@@ -108,10 +109,10 @@ def main():
     results_dir.mkdir(parents=True, exist_ok=True)
     
     # Metrics storage
-    csv_rows = [["filename", "dice", "iou", "bce_loss"]]
+    csv_rows = [["filename", "dice", "iou", "bce_loss", "hd95"]]
     
     # Overall metrics list
-    dice_list, iou_list, loss_list = [], [], []
+    dice_list, iou_list, loss_list, hd95_list = [], [], [], []
     
     # Prediction save directory
     if SAVE_PNG:
@@ -179,12 +180,23 @@ def main():
                 iou_val = iou_scores[i].item()
                 loss_val = batch_loss.item()  # Batch-level loss
                 
-                # Store overall metrics
+                # Calculate HD95 for this sample
+                # Convert to numpy: probs is [B, 1, H, W], masks is [B, 1, H, W]
+                pred_binary = (probs[i, 0].cpu().numpy() > 0.5).astype(bool)
+                mask_binary = (masks[i, 0].cpu().numpy() > 0.5).astype(bool)
+                hd95_val = hd95_numpy(pred_binary, mask_binary)
+                
+                # Store overall metrics (skip infinite HD95 values when averaging)
                 dice_list.append(dice_val)
                 iou_list.append(iou_val)
                 loss_list.append(loss_val)
+                if not np.isinf(hd95_val):
+                    hd95_list.append(hd95_val)
+                
+                # Format HD95 for CSV (use "inf" string for infinite values)
+                hd95_str = "inf" if np.isinf(hd95_val) else f"{hd95_val:.4f}"
                 csv_rows.append([filename, f"{dice_val:.4f}", 
-                               f"{iou_val:.4f}", f"{loss_val:.6f}"])
+                               f"{iou_val:.4f}", f"{loss_val:.6f}", hd95_str])
             
             pbar.set_postfix(loss=batch_loss.item())
             pbar.update()
@@ -193,9 +205,11 @@ def main():
     mean_dice = np.mean(dice_list)
     mean_iou = np.mean(iou_list)
     mean_loss = np.mean(loss_list)
+    mean_hd95 = np.mean(hd95_list) if hd95_list else float('inf')
     
+    hd95_avg_str = "inf" if np.isinf(mean_hd95) else f"{mean_hd95:.4f}"
     csv_rows.append(["AVERAGE", f"{mean_dice:.4f}", f"{mean_iou:.4f}", 
-                    f"{mean_loss:.6f}"])
+                    f"{mean_loss:.6f}", hd95_avg_str])
     
     # Save CSV file
     csv_path = results_dir / "metrics.csv"
@@ -211,6 +225,10 @@ def main():
     print(f"   BCE Loss : {mean_loss:.6f}")
     print(f"   Mean Dice: {mean_dice:.4f} ± {np.std(dice_list):.4f}")
     print(f"   Mean IoU : {mean_iou:.4f} ± {np.std(iou_list):.4f}")
+    if hd95_list:
+        print(f"   Mean HD95: {mean_hd95:.4f} ± {np.std(hd95_list):.4f}")
+    else:
+        print(f"   Mean HD95: inf (all samples had empty masks)")
     
     
     print(f"\n📊 EFFICIENCY METRICS:")
@@ -236,7 +254,10 @@ def main():
             "iou": float(mean_iou),
             "iou_std": float(np.std(iou_list)),
             "bce_loss": float(mean_loss),
-            "n_samples": len(dice_list)
+            "hd95": float(mean_hd95) if not np.isinf(mean_hd95) else None,
+            "hd95_std": float(np.std(hd95_list)) if hd95_list else None,
+            "n_samples": len(dice_list),
+            "n_hd95_samples": len(hd95_list)
         },
         "efficiency": {
             "parameters_M": efficiency_results['total_params']/1e6,
